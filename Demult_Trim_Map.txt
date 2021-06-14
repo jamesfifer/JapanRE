@@ -1,0 +1,84 @@
+#DEMULTIPLEXING, TRIMMING AND MAPPING 
+# ==============================================
+#Download scripts from https://github.com/z0on/2bRAD_denovo
+# will need bowtie2, samtools, and picard. They are pre-installed as modules on TACC; you will have to install them if you don't have these modules on your 
+cluste$
+module load perl
+module load bowtie
+module load samtools
+module load picard-tools
+
+# millepora fasta file 
+
+export GENOME_FASTA=db/mygenome.fasta
+export GENOME_DICT=db/mygenome.dict
+
+# indexing genome for bowtie2 mapper
+bowtie2-build $GENOME_FASTA $GENOME_FASTA
+
+samtools faidx $GENOME_FASTA
+
+export GENOME_DICT=db/mygenome.dict
+java -jar $TACC_PICARD_DIR/picard.jar CreateSequenceDictionary R=$GENOME_FASTA  O=$GENOME_DICT
+
+#2bRAD_trim_launch_dedup.pl is from https://github.com/z0on/2bRAD_denovo
+2bRAD_trim_launch_dedup.pl fastq > trims
+
+#gunzip all fastqs and create symbolic link to current directory
+for i in /projectnb/davieslab/jfifer/Japan_rad/Raw_fastqs/*.fastq; do ln -s $i ./; done
+2bRAD_trim_launch_dedup.pl fastq > trims
+
+#make sure files look like what they do in this trims^ add & to each line and 'wait' at end
+#e.g.:
+#../trim2bRAD_2barcodes_dedup.pl input=Fifer_Pool1-Fifer1_Pool12_S2_L004_R1_001.fastq site=".{12}CGA.{6}TGC.{12}|.{12}GCA.{6}TCG.{12}" adaptor="AGATC" sampleID=100 &
+
+# quality filtering using fastx_toolkit (install fastx_toolkit if you don't have this module)
+module load fastx_toolkit
+ls *.tr0 | perl -pe 's/^(\S+)\.tr0$/cat $1\.tr0 \| fastq_quality_filter -q 20 -p 100 >$1\.trim/' >filt0
+
+# NOTE: run the next line ONLY if your qualities are 33-based
+# (if you don't know just try to see if it works eventually, if you get errors from fastx_toolkit, try the other one):
+        cat filt0 | perl -pe 's/filter /filter -Q33 /' > filt
+#^qualities were 33-based for this dataset
+
+# execute all commands in filt file (serial or parallel using Launcher, if your system allows)
+#check filt file for how to do
+
+# do we have expected number of *.trim files created?
+ls -l *.trim | wc -l
+
+export GENOME_FASTA=/projectnb/davieslab/jfifer/Japan_rad/Sym/Cladocopium_goreaui/Cladocopium_goreaui.genome.fa
+../2bRAD_bowtie2_launch.pl '\.trim$' $GENOME_FASTA > bt2
+
+# execute all commands written to bt2...
+
+# what are mapping efficiencies?
+>alignmentRates
+for F in `ls *trim`; do
+M=`grep -E '^[ATGCN]+$' $F | wc -l | grep -f - bt2.e* -A 4 | tail -1 | perl -pe 's/maps\.e\d+-|% overall alignment rate//g'` ;
+echo "$F.sam $M">>alignmentRates;
+done
+
+cat bt2.e*
+
+# find out mapping efficiency for a particular input file (O9.fastq in this case)
+# (assuming all input files have different numbers of reads)
+grep -E '^[ATGCN]+$' O9.*trim | wc -l | grep -f - maps.e* -A 4
+
+
+
+# BAM files are the input into various genotype calling / popgen programs, this is the main interim result of the analysis. Archive them.
+
+>s2b
+for file in *.sam; do
+echo "samtools sort -O bam -o ${file/.sam/}.bam $file && samtools index ${file/.sam/}.bam">>s2b;
+done
+
+#add following the s2b
+
+module load perl/5.28.1
+module load htslib/1.9
+module load samtools/1.9
+module load picard
+
+
