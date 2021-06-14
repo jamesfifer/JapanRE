@@ -1,0 +1,203 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Chi-Squared 
+#Run script chisquare.R
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Slatkin's directionality index## NOTE Pipeline is from github/BenjaminPeter/rangeExpansion
+export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+FILTERS="-maxHetFreq 0.5 -uniqueOnly 1 -remove_bads 1  -skipTriallelic 1 -minMapQ 20 -minQ 25 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -minInd 76 "
+TODO="-doMajorMinor 1 -doMaf 1 -dosnpstat 1 -doPost 2 -doGeno 11 -doVcf 1 -anc $GENOME_REF -ref $GENOME_REF"
+angsd -GL 1 -b ../all.bamscl.North $FILTERS $TODO -out slatkin2
+
+#how do I filter out all loci that have the same alleles as ancestral?
+tabix -p vcf file.vcf.gz
+module load samtools
+tabix -p vcf slatkin2.vcf.gz
+bcftools view -e 'COUNT(GT="RR")=N_SAMPLES' slatkin2.vcf.gz > fixed.anc.rm.slatkin2.vcf
+
+
+#for psi
+#We used the directionality index Ψ25 to test the occurrence of a range expansion and to infer the origin of the range expansion (Extended Data Table 1).
+# For this analysis, we used biallelic SNPs showing consensus genotypes across all outgroup individuals, and we defined the ancestral allele as that consensus
+#outgroup allele. After excluding sites where one or both of the two focal populations (S1 and S2) was fixed for the ancestral allele,
+#we calculated a Two-dimensional site derived allele frequency spectrum between populations as described previously25.
+
+module load plink/1.9
+plink --vcf fixed.anc.rm.slatkin2.vcf --set-missing-var-ids "@_#" --make-bed --out fixed.anc --allow-extra-chr
+
+module load java/1.8.0_181
+java -jar ./PGDSpider_2.0.7.1/PGDSpider2-cli.jar -inputfile fixed.anc.rm.slatkin2.vcf -outputfile test.fixed.anc.rm.nexus -spid sfsSites.spid
+#remove everything above and below the ind0,1,0,0,10 etc
+sed 's/\(.\{1\}\)/\1,/g' fixed.anc.rm.nexus | awk -F "\t" 'function GSUB(F) {gsub(/\,/,"",$1)} {GSUB(1);GSUB(2);GSUB(3);GSUB(4);GSUB(5);GSUB(6)}1' | awk '{gsub(/ /,"")}1' | sed 's/,$//' > fixed.anc.rm.snapp
+
+#Run script RE.R 
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Linkage Disequilibirum NOTE: https://github.com/fgvieira/ngsLD
+# -doGeno 8 : genotype likelihood format setting for ngsLD; if you want to run PCA, use -doGeno 32 (but I recommend using ibsMat for all ordination work)
+#FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -skipTriallelic 1  -snp_pval 1e-5 -minMaf 0.001"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+
+
+
+#min ind do 80%
+#18 bamscl_Amakusa.txt
+#19 bamscl_Kochi.txt
+#20 bamscl_Kushima.txt
+#17 bamscl_Kushimoto.txt
+#36 bamscl_Oura.txt
+#38 bamscl_Sekisei.txt
+#18 bamscl_Shirahama.txt
+
+
+
+
+#angsd -b ./bamscl_Amakusa.txt -GL 1 $FILTERS $TODO -minInd 14 -P 1 -out myresultAmakusa
+#angsd -b ./bamscl_Kochi.txt -GL 1 $FILTERS $TODO -minInd 15 -P 1 -out myresultKochi
+#angsd -b ./bamscl_Kushima.txt -GL 1 $FILTERS $TODO -minInd 16 -P 1 -out myresultKushima
+#angsd -b ./bamscl_Kushimoto.txt -GL 1 $FILTERS $TODO -minInd 13 -P 1 -out myresultKushimoto
+#angsd -b ./bamscl_Oura.txt -GL 1 $FILTERS $TODO -minInd 28 -P 1 -out myresultOura
+#angsd -b ./bamscl_Sekisei.txt -GL 1 $FILTERS $TODO -minInd 30 -P 1 -out myresultSekisei
+#angsd -b ./bamscl_Shirahama.txt -GL 1 $FILTERS $TODO -minInd 14 -P 1 -out myresultShirahama
+#for f in *geno.gz; do NS=`zcat $f| wc -l`; tmp=${f#myresult}; tmpr=${tmp%.geno.gz}; NB=`cat bamscl_$tmpr.txt | wc -l`; zcat myresult$tmpr.mafs.gz | tail -n +2 | cut -f 1,2 > $tmpr.sites; done
+#for f in *geno.gz; do NS=`zcat $f| wc -l`; tmp=${f#myresult}; tmpr=${tmp%.geno.gz}; NB=`cat bamscl_$tmpr.txt | wc -l`; echo ngsLD --geno $f --probs 1 --n_ind $NB --n_sites $NS --max_kb_dist 0 --pos $tmpr.sites --out $tmpr.LD 
+--n_threads 12 --extend_out 1; done >ngsLD.sh
+#copy header from this file into the header of ngsLD.sh
+#run ngsLD.sh
+
+
+gzip *.LD
+
+##
+#some other things to try aside from r2
+
+
+#for i in *.LD.gz; do mv $i ${i/%.LD.gz/}.ld_sampled.gz; done
+module load R
+# Run exponential curve fitting script
+ls *.ld_sampled.gz | awk 'BEGIN{print "File\tSpecies"} {sp=$1; sub(".*/","",sp); sub("[.].*","",sp); sub(/\w/, substr(toupper(sp),1,1), sp); print $1"\t"sp}'| Rscript --vanilla --slave fit_LDdecay.R --header --ld r2 
+--max_kb_dist 200 --fit_bin_size 1000 --fit_level 100 --fit_boot 100 --plot_group Species --plot_data --plot_scale 3 -o PUBLISH.real_data.LD_r2_.001data.pdf
+#test
+#for i in *.ld_sampled.gz; do zcat $i| awk 'rand()<0.05' | gzip --best > ${i/%.ld_sampled.gz/}.ld_subsampled.gz; done
+
+
+#ls *.ld_subsampled.gz | awk 'BEGIN{print "File\tSpecies"} {sp=$1; sub(".*/","",sp); sub("[.].*","",sp); sub(/\w/, substr(toupper(sp),1,1), sp); print $1"\t"sp}'| Rscript --vanilla --slave fit_LDdecay.R --header --ld r2 
+--max_kb_dist 200 --fit_bin_size 1000 --fit_level 100 --fit_boot 100 --plot_group Species --plot_data --plot_scale 3 -o PUBLISH.real_data.LD_r2_.001.test.data.pdf
+
+#will create a Robject named LD.test.Rdata". Load on interactive cluster to make changes to plot
+
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Purifying selection
+#no maf
+#do with North only
+module load angsd
+#new:
+
+#xould try without snp value too, increased quality
+#FILTERS="-uniqueOnly 1 -minMapQ 25 -minQ 30 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -maxHetFreq 0.5 -skipTriallelic 1 -minInd 76 -snp_pval 1e-5"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doBcf 1 -doPost 1 -doGlf 2"
+# Starting angsd with -P the number of parallel processes. Funny but in many cases angsd runs faster on -P 1
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -b /projectnb/davieslab/jfifer/Japan_rad/Demographic_analysis_II/North_Only/all.bamscl.North -GL 1 $FILTERS $TODO -P 1 -out north.nomaf
+
+#bcftools view north.nomaf.bcf >north.nomaf.vcf
+
+##run vep
+#come back with sites
+
+#module load angsd
+#angsd sites index synonymous.north.nomaf.sites
+#angsd sites index missense.north.nomaf.sites
+
+
+
+##export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+#TODO="-doSaf 1 -anc $GENOME_REF -ref $GENOME_REF"
+
+
+#18 bamscl_Amakusa.txt
+#19 bamscl_Kochi.txt
+#21 bamscl_Kushima.txt
+#18 bamscl_Kushimoto.txt
+#19 bamscl_Shirahama.txt
+
+
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Amakusa.txt -GL 1 -P 1 -minInd 14 $TODO -out Amakusa.nomaf.synon # 18
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kochi.txt -GL 1 -P 1 -minInd 15 $TODO -out Kochi.nomaf.synon # 19
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kushima.txt -GL 1 -P 1 -minInd 16 $TODO -out Kushima.nomaf.synon #21
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kushimoto.txt -GL 1 -P 1 -minInd 14 $TODO -out Kushimoto.nomaf.synon #18
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Shirahama.txt -GL 1 -P 1 -minInd 14 $TODO -out Shirahama.nomaf.synon #19
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites missense.north.nomaf.sites -b ./bamscl_Amakusa.txt -GL 1 -P 1 -minInd 14 $TODO -out Amakusa.nomaf.mis # 18
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites missense.north.nomaf.sites -b ./bamscl_Kochi.txt -GL 1 -P 1 -minInd 15 $TODO -out Kochi.nomaf.mis # 19
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites missense.north.nomaf.sites -b ./bamscl_Kushima.txt -GL 1 -P 1 -minInd 16 $TODO -out Kushima.nomaf.mis #21
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites missense.north.nomaf.sites -b ./bamscl_Kushimoto.txt -GL 1 -P 1 -minInd 14 $TODO -out Kushimoto.nomaf.mis #18
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites missense.north.nomaf.sites -b ./bamscl_Shirahama.txt -GL 1 -P 1 -minInd 14 $TODO -out Shirahama.nomaf.mis #19
+
+#for i in *saf.idx; do /projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS $i >${i/%saf.idx/}sfs; done
+
+############Thetasss
+#export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+#TODO="-doSaf 1 -doThetas 1 -anc $GENOME_REF -ref $GENOME_REF"
+
+#angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Amakusa.txt -GL 1 -P 1 $TODO -pest ./Amakusa.nomaf.synon.sfs -out Amakusa.nomaf.synon # 18
+#angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kochi.txt -GL 1 -P 1 $TODO -pest ./Kochi.nomaf.synon.sfs -out Kochi.nomaf.synon # 19
+#angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kushima.txt -GL 1 -P 1 $TODO -pest ./Kushima.nomaf.synon.sfs -out Kushima.nomaf.synon #20
+#angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Kushimoto.txt -GL 1 -P 1 $TODO -pest ./Kushimoto.nomaf.synon.sfs -out Kushimoto.nomaf.synon #17
+#angsd -sites synonymous.north.nomaf.sites -b ./bamscl_Shirahama.txt -GL 1 -P 1 $TODO -pest ./Shirahama.nomaf.synon.sfs -out Shirahama.nomaf.synon #18
+
+#angsd -sites missense.north.nomaf.sites -b ./bamscl_Amakusa.txt -GL 1 -P 1 $TODO -pest ./Amakusa.nomaf.mis.sfs -out Amakusa.nomaf.mis # 18
+#angsd -sites missense.north.nomaf.sites -b ./bamscl_Kochi.txt -GL 1 -P 1 $TODO -pest ./Kochi.nomaf.mis.sfs -out Kochi.nomaf.mis # 19
+#angsd -sites missense.north.nomaf.sites -b ./bamscl_Kushima.txt -GL 1 -P 1 $TODO -pest ./Kushima.nomaf.mis.sfs -out Kushima.nomaf.mis #20
+#angsd -sites missense.north.nomaf.sites -b ./bamscl_Kushimoto.txt -GL 1 -P 1 $TODO -pest ./Kushimoto.nomaf.mis.sfs -out Kushimoto.nomaf.mis #17
+#angsd -sites missense.north.nomaf.sites -b ./bamscl_Shirahama.txt -GL 1 -P 1 $TODO -pest ./Shirahama.nomaf.mis.sfs -out Shirahama.nomaf.mis #18
+
+
+for i in *thetas.idx; do /projectnb/davieslab/jfifer/Japan_rad/angsd/misc/thetaStat do_stat $i; done
+for i in *thetas.idx; do /projectnb/davieslab/jfifer/Japan_rad/angsd/misc/thetaStat print $i > $i.logscaled; done
+for i in *logscaled; do awk '{print exp($4*log(10));}' $i | tail -n +2 > ${i/%.logscaled/}.raw; done
+
+#for i in *.raw; do awk '{ total += $1 } END { print total/NR }' $i; echo $i;  done
+
+#0.0334254
+#Amakusa.nomaf.mis.thetas.idx.raw
+#0.0433475
+#Amakusa.nomaf.synon.thetas.idx.raw
+#0.0325498
+#Kochi.nomaf.mis.thetas.idx.raw
+#0.039963
+#Kochi.nomaf.synon.thetas.idx.raw
+#0.0343441
+#Kushima.nomaf.mis.thetas.idx.raw
+#0.0406025
+#Kushima.nomaf.synon.thetas.idx.raw
+#0.0324519
+#Kushimoto.nomaf.mis.thetas.idx.raw
+#0.0414528
+#Kushimoto.nomaf.synon.thetas.idx.raw
+##0.0339438
+#Shirahama.nomaf.mis.thetas.idx.raw
+#0.0430634
+#Shirahama.nomaf.synon.thetas.idx.raw
+
+
+#Shirahama mis/synon= .788
+#Kushimoto= .783
+#Kushima=.846
+#Kochi=.814
+#Amakusa=.77
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

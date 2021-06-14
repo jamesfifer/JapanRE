@@ -1,0 +1,676 @@
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Determining filtering parameters##
+module load angsd/0.923
+ ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+
+# angsd settings:
+# -minMapQ 20 : only highly unique mappings (prob of erroneous mapping = 1%)
+# -baq 1 : realign around indels (not terribly relevant for 2bRAD reads mapped with --local option)
+# -maxDepth : highest total depth (sum over all samples) to assess; set to 10x number of samples 10x189= 1890
+
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -baq 1 -ref ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta -maxDepth 1890"
+
+# T O   D O :
+TODO="-doQsDist 1 -doDepth 1 -doCounts 1 -dumpCounts 2"
+#dumpCounts gives various per site counts
+
+# in the following line, -r argument is one chromosome or contig to work with (no need to do this for whole genome as long as the chosen chromosome or 
+contig is long enough)
+# (look up lengths of your contigs in the header of *.sam files)
+##^Long enough for what?## Chr1 has the highest LN (39361238)
+angsd -b bams -r chr1 -GL 1 $FILTERS $TODO -P 1 -out dd
+
+
+# summarizing results (using modified script by Matteo Fumagalli)
+#Rscript plotQC.R dd >qranks
+# proportion of sites covered at >5x:
+#cat qranks
+
+# scp dd.pdf to laptop to look at distribution of base quality scores, fraction of sites in each sample passing coverage thresholds, and fraction of sites 
+passing genotyping rates cutoffs. Use these to guide choices of -minQ,  -minIndDepth and -minInd filters in subsequent ANGSD runs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Clone identification##
+module load angsd/0.923
+
+
+# Note: PCA and Admixture are not supposed to be run on data that contain clones (or genotyping replicates); manually remove them from bams list. If you 
+want to detect clones, however, do keep the replicates and analyse identity-by-state (IBS) matrix (explained below)
+
+# Generating genotype likelihoods from highly confident (non-sequencing-error) SNPs
+
+# F I L T E R S
+# WITH clones
+# Suggested filters :
+# -minMapQ 20 : only highly unique mappings
+# -minQ 30 : only highly confident base calls
+# -minInd 151 : the site must be genotyped in at least 50 individuals (note: set this to at least 80% of your total number of your individuals)
+# -snp_pval 1e-5 : high confidence that the SNP is not just sequencing error
+# -minMaf 0.05 : only common SNPs, with allele frequency 0.05 or more. Consider raising this to 0.1 for population structure analysis.
+# Note: the last two filters are very efficient against sequencing errors but introduce bias against true rare alleles. It is OK (and even desirable) - 
+UNLESS$
+# also adding filters against very badly non-HWE sites (such as, all calls are heterozygotes => lumped paralog situation) and sites with really bad strand 
+bia$
+#FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 30 -minInd 151 -snp_pval 1e-5 -minMaf 0.05 -dosnpstat 1 -doHWE 1 -hwe_pval 1e-5 -sb_pval 1e-5"
+
+# use dd.pdf to dictate scores for minQ, minIndDepth and minInd.
+# THINGS FOR ANGSD TO DO :
+# -GL 1 : samtools likelihood model
+# -doGlf 2 : output beagle format (for admixture)
+# -doPost 1 : output posterior allele frequencies based on HWE prior
+# -doGeno 32 : binary genotype likelihoods format (for ngsCovar => PCA)
+# -doMajorMinor 1 : infer major and minor alleles from data (not from reference)
+# -makeMatrix 1 -doIBS 1 -doCov 1 : identity-by-state and covariance matrices based on single-read resampling (robust to variation in coverage across 
+samples)
+
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 32 -doPost 1 -doGlf 2"
+
+# Starting angsd with -P the number of parallel processes. Funny but in many cases angsd runs faster on -P 1
+#angsd -b bams -GL 1 $FILTERS $TODO -P 1 -out myresult
+# See script angsd_ibs_pca_JF.R for hierarchical clustering of samples based on IBS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Lineage assignments## 
+#Bam list DOES NOT contain clones
+##trying without linked sites
+#
+
+#NS=`zcat myresult.geno.gz| wc -l`
+#NB=`cat ../bamscl | wc -l`
+#zcat myresult.mafs.gz | tail -n +2 | cut -f 1,2 > mc1.sites
+
+#module load ngsLD
+#ngsLD --geno myresult.geno.gz --probs 1 --n_ind $NB --n_sites $NS --max_kb_dist 0 --pos mc1.sites --out LD.out --n_threads 12 --extend_out 1
+
+#according to ngsLD the weight is a measure of LD level https://pdfs.semanticscholar.org/060e/b6e8c18aaef686d9244bce28672bbffc4955.pdf
+#make sure all modules are installed, I was missing easy graphs
+# wget https://cpan.metacpan.org/authors/id/S/SH/SHLOMIF/Graph-Easy-0.76.tar.gz
+##tar -xzf Graph-Easy-0.76.tar.gz
+#cd Graph-Easy-0.76/
+# perl Makefile.PL
+##make test
+#make install
+#module load perl
+#perl /projectnb/davieslab/jfifer/Japan_rad/Demographic_analysis_II/North_Only/Bayenv/prune_graph.pl --in_file LD.out --max_kb_dist 5 --min_weight 0.2 --out testLD_unlinked.id
+#sed 's/:/\t/g' testLD_unlinked.id > LD_unlinked.sites
+
+##sort LD_unlinked.sites >sorted.LD_unlinked.sites
+#angsd sites index sorted.LD_unlinked.sites
+
+#FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 132 -snp_pval 1e-5 -minMaf 0.05"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+# Starting angsd with -P the number of parallel processes. Funny but in many cases angsd runs faster on -P 1
+#angsd -sites sorted.LD_unlinked.sites -b ./all.bams -GL 1 $FILTERS $TODO -P 1 -out myresult.noLD
+# scp *Mat, *covar, *qopt and bams files to laptop
+
+#See scripts admixturePlotting_v5_JF.R for admixture barplots and angsd_ibs_pca_JF.R for PCAs 
+
+#without linked
+
+# NgsAdmix for K from 2 to 5 : do not run if the dataset contains clones or genotyping replicates!
+#for K in `seq 2 5` ;
+#do
+#NGSadmix -likes myresult.noLD.beagle.gz -K $K -P 10 -o mydata.noLD_k${K};
+#done
+
+# alternatively, to use real ADMIXTURE on called SNPs (requires plink and ADMIXTURE):
+#gunzip myresult.noLD.vcf.gz
+#module load admixture/1.3.0
+#module load plink/1.90b6.4
+
+#plink --vcf myresult.noLD.vcf --make-bed --allow-extra-chr 0 --out myresult.noLD
+#for K in `seq 1 5`; \
+#do admixture --cv myresult.noLD.bed $K | tee myresult.noLD_${K}.out; done
+
+# which K is least CV error?
+#grep -h CV myresult.noLD_*.out
+
+#CV error (K=1): 0.53296
+#CV error (K=2): 0.45103
+#CV error (K=3): 0.43497
+#CV error (K=4): 0.43349
+#CV error (K=5): 0.44908
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Analysis of genetic divergence## 
+#Calculating SAF
+#158 inds
+# note pop1= RED, pop2=BLUE, pop3=TAN ,pop4=GREEN
+
+module load angsd/0.923
+# filtering sites to work on - use only filters that do not distort allele frequency
+# set minInd to 75-90% of the total number fo individuals in the project
+# if you are doing any other RAD than 2bRAD or GBS, remove '-sb_pval 1e-5' from FILTERS
+FILTERS="-uniqueOnly 1 -remove_bads 1  -skipTriallelic 1 -minMapQ 25 -minQ 30 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -minInd 126 "
+TODO="-doMajorMinor 1 -doMaf 1 -dosnpstat 1 -doPost 2 -doGeno 8"
+angsd -b ../../bamscl_3pop -GL 1 $FILTERS $TODO -P 1 -out AllSites
+angsd sites index AllSites 
+export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+TODO="-doSaf 1 -anc $GENOME_REF -ref $GENOME_REF"
+# In the following lines, set minInd to 75-90% of each pop's sample size
+/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites AllSites -b ../bamscl_pop2 -GL 1 -P 1 -minInd 16 $TODO -out pop2.out # 21
+/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites AllSites -b ../bamscl_pop4 -GL 1 -P 1 -minInd 34 $TODO -out pop4.out # 43
+/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites AllSites -b ../bamscl_northpop -GL 1 -P 1 -minInd 75 $TODO -out popN.out #94
+# generating per-population SFS
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS pop2.out.saf.idx >pop2.sfs
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS popN.out.saf.idx >popN.sfs
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS pop4.out.saf.idx >pop4.sfs
+
+# global Fst between populations
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS  fst index ../pop2.out.saf.idx ../popN.out.saf.idx -sfs ../pop2.popN.sfs -fstout pop2popN.fst
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS  fst index ../pop2.out.saf.idx ../pop4.out.saf.idx -sfs ../pop2.pop4.sfs -fstout pop2pop4.fst
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS  fst index ../pop4.out.saf.idx ../popN.out.saf.idx -sfs ../pop4.popN.sfs -fstout pop4popN.fst
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Heterozygosity##
+FILTERS="-maxHetFreq 0.5 -uniqueOnly 1 -remove_bads 1 -skipTriallelic 1 -minMapQ 25 -minQ 30 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -minInd 126"
+TODO="-ref $GENOME_REF -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 32 -doPost 1 -doGlf 2 -doCounts 1 -doMajorMinor 1 -dosnpstat 1 -doMaf 1"
+/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -bam /projectnb/davieslab/jfifer/Japan_rad/admixed_pops_analysis/4pop_analysis/bamscl_3pop -GL 1 -P 1 $TODO $FILTERS -out lineage_ref
+#scp beagle.gz and use script XXXX.R to calculate heterozygosity 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Demographic analyses##
+##Removing linked sites##
+#NS=`zcat AllSites.geno.gz| wc -l`
+#NB=`cat ../../bamscl_3pop | wc -l`
+#zcat AllSites.mafs.gz | tail -n +2 | cut -f 1,2 > mc1.sites
+#ngsLD --geno AllSites.geno.gz --probs 1 --n_ind $NB --n_sites $NS --max_kb_dist 100 --pos mc1.sites --out AllSites.LD --n_threads 12 --extend_out 1 --min_maf 0.0
+
+#module load perl
+
+#cat AllSites.LD | cut -f 1,3,5- | perl /projectnb/davieslab/jfifer/Japan_rad/Demographic_analysis_II/North_Only/Bayenv/prune_graph.pl --max_kb_dist 10 --min_weight 0.1 --weight_type a > 0.1_unlinked
+
+#sed 's/:/\t/g' 0.1_unlinked > 0.1_unlinked.sites
+#awk  '$2!=""' 0.1_unlinked.sites > 0.1_unlinked.sites.tmp; mv 0.1_unlinked.sites.tmp 0.1_unlinked.sites
+#sort -k1 0.1_unlinked.sites > 0.1_unlinked.sites_2.tmp; mv 0.1_unlinked.sites_2.tmp 0.1_unlinked.sites
+
+#angsd sites index 0.1_unlinked.sites
+
+#FILTERS="-uniqueOnly 1 -skipTriallelic 1 -minMapQ 25 -minQ 30 -doHWE 1 -maxHetFreq 0.5 -hetbias_pval 1e-5 -minInd 126 -sb_pval 1e-5"
+#TODO='-doMajorMinor 1 -doMaf 1 -dosnpstat 1 -doPost 2'
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -sites 0.1_unlinked.sites -b ../../bamscl_3pop -GL 1 $FILTERS $TODO -P 1 -out 0.1_unlinked.sites
+#zcat 0.1_unlinked.sites.mafs.gz | cut -f 1,2 | tail -n +2 > finalsites_0.1_unlinked
+#angsd sites index finalsites_0.1_unlinked
+
+##bootstrapping SFS## #NOTE THIS IS FOLLOWING THE PIPELINE FROM https://github.com/z0on/AFS-analysis-with-moments
+export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+f=(*.saf.idx)
+for B in `seq 1 100`; do :; for ((i = 0; i < ${#f[@]}; i++)); do       for ((j = i + 1; j < ${#f[@]}; j++)); do           echo "/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS ${f[i]} ${f[j]} \
+-ref "\$GENOME_REF" -anc "\$GENOME_REF"  -bootstrap 6 -P 1 -resample_chr 1 -seed  "\$RAN_SEED" > boot.${f[i]/%.out.saf.idx/}${f[j]/%.out.saf.idx/}/${f[i]/%.out.saf.idx/}${f[j]/%.out.saf.idx/}_$B " >>b100.txt;       done;   
+done; done
+#3pop
+
+export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+for B in `seq 1 100`; do echo "/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS pop2.out.saf.idx pop4.out.saf.idx popN.out.saf.idx \
+-ref "\$GENOME_REF" -anc "\$GENOME_REF"  -bootstrap 6 -P 1 -resample_chr 1 -seed  "\$RAN_SEED" > boot.pop2pop4popN/pop2pop4popN_$B " >>3pop_b100.txt;       done
+grep pop2pop4 b100.txt >b100_pop2pop4.txt
+
+
+##Create a job with the following info##
+#Job Start
+cp /projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta $TMPDIR
+export GENOME_REF=$TMPDIR/Amil.v2.01.chrs.fasta
+# Read the file b100_mod.txt into a bash array, one line per array element.
+# There are 1000 lines in the file, one for each job in the job array.  If you
+# use a different sized file, change the number of jobs in the array accordingly.
+
+
+RAN_SEED=`od -An -N4 -i /dev/random`
+echo Random seed: $RAN_SEED
+# Each line in the file is a command to execute.
+# Each job in the job array will run this command.
+readarray -t CMD_ARRAY < b100_pop2pop4.txt
+
+# bash indexes arrays from 0 but SGE_TASK_ID must start from 1.  Subtract 1 from the
+# SGE_TASK_ID to get the correct index into CMD_ARRAY
+INDEX=$(($SGE_TASK_ID-1))
+
+# Execute the command for this job array
+echo Executing command:  "${CMD_ARRAY[$INDEX]}"
+eval "${CMD_ARRAY[$INDEX]}"
+#Job end
+#Repeat for all pairwise comparisons 
+
+##After bootstrapping take average to create 100 SFS bootstraps for each pairwise comp##
+#Pop2 21 (*2+1) 43  (*2*.8) 33
+#Pop4 43 87 68
+#PopN 94 189 150
+#two pop
+SFSIZE="43 87" # 2N+1 for each population. In this case we assume that we have sampled 10 diploid individuals from each `p1` and `p2`.
+for B in `seq 1 100`; do
+echo $SFSIZE > pop2pop4_${B}.sfs;
+tail -5 pop2pop4_${B} | awk '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.3f", a[i]/NR; printf "\t"};printf "\n"}' >> pop2pop4_${B}.sfs;
+done
+
+SFSIZE="87 189" # 2N+1 for each population. In this case we assume that we have sampled 10 diploid individuals from each `p1` and `p2`.
+for B in `seq 1 100`; do
+echo $SFSIZE > pop4popN_${B}.sfs;
+tail -5 pop4popN_${B} | awk '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.3f", a[i]/NR; printf "\t"};printf "\n"}' >> pop4popN_${B}.sfs;
+done
+
+SFSIZE="43 189" # 2N+1 for each population. In this case we assume that we have sampled 10 diploid individuals from each `p1` and `p2`.
+for B in `seq 1 100`; do
+echo $SFSIZE > pop2popN_${B}.sfs;
+tail -5 pop2popN_${B} | awk '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.3f", a[i]/NR; printf "\t"};printf "\n"}' >> pop2popN_${B}.sfs;
+done
+
+####find best model
+
+cp /projectnb/davieslab/jfifer/Japan_rad/AFS-analysis-with-moments/multimodel_inference/allmodels_unfolded allmodels_unfolded
+
+NREPS=6 # number of random restarts per model per bootstrap rep
+>mods
+for i in `seq 1 $NREPS`;do
+cat allmodels_unfolded >>mods;
+done
+
+sed -i -e 's/^/\/projectnb\/davieslab\/jfifer\/Japan_rad\/AFS-analysis-with-moments\/multimodel_inference\/py2\//' mods
+#Pop2 21 (*2+1) 43  (*2*.8) 33
+#Pop4 43 87 68
+#PopN 94 189 150
+
+#CONTRAST=pop2pop4  # name of population comparison, should match the leading part of the bootstapped SFS names
+#ARGS="pop2 pop4 33 68 0.018 0.005" # pop1, pop2, projection for pop1, projection for pop2, mutation rate (per genotyped portion of the genome per generation), generation time in thousands of
+#CONTRAST=pop4popN
+#ARGS="pop4 popN 68 150 0.018 0.005"
+#CONTRAST=pop2popN
+#ARGS="pop2 popN 33 150 0.018 0.005"
+
+rm -f modsel args
+
+>modsel
+for B in `seq 1 10`; do
+INFILE=${CONTRAST}_${B}.sfs;
+echo $INFILE;
+NMODELS=`cat mods | wc -l`
+>args
+>${CONTRAST}.stdout
+for i in `seq 1 $NMODELS`; do echo "$INFILE $ARGS >>${CONTRAST}.stdout & PID=\$! && sleep 360m && kill -9 \$PID " >>args; done; paste mods args -d " " >>modsel; done
+
+
+#######Booting winning model###############
+#CONTRAST=pop2pop4
+#CONTRAST=pop2popN
+#CONTRAST=pop4popN
+#have to add -a to each grep because for some reason it reading as binary, I think because of weird ^@ characters?
+#need to remove weird characters will fuck up lines further down if you don't
+sed -i 's/\x00//g' ${CONTRAST}.stdout
+
+grep -a RESULT ${CONTRAST}.stdout -A 4 | grep -aE "[0-9]|\]" | perl -pe 's/^100.+\.o\d+\S//' | perl -pe 's/\n//' | perl -pe 's/[\[\]]//g' | perl -pe 's/RESULT/\nRESULT/g' | grep -a RESULT  >${CONTRAST}.res
+#go through .res and make sure there aren't any lines that were cut off (delete those lines)
+
+#rm winner*
+
+##Use modSel_summary_JF.R to create .winmod
+
+
+NREPS=6 # number of random restarts per model per bootstrap rep
+>winner.mods
+for i in `seq 1 $NREPS`;do
+awk '{print $2}' *.winmod | sed 's/$/.py/'  >>winner.mods;
+done
+
+
+sed -i -e 's/^/\/projectnb\/davieslab\/jfifer\/Japan_rad\/AFS-analysis-with-moments\/multimodel_inference\/py2\//' winner.mods
+
+#Pop2 21 (*2+1) 43  (*2*.8) 33
+#Pop4 43 87 68
+#PopN 94 189 150
+
+CONTRAST=pop2pop4 # name of population comparison, should match the leading part of the bootstapped SFS names
+ARGS="pop2 pop4 33 68 0.018 0.005" # pop1, pop2, projection for pop1, projection for pop2, mutation rate (per genotyped portion of the genome per generation), generation time in thousands of
+#years.
+#Population names can be anything. For ANGSD-derived SFS, projections should be 0.8*2N for each population (ronded to integer); in the case shown here, each population was represented by 10
+#individuals.
+
+#CONTRAST=pop2popN # name of population comparison, should match the leading part of the bootstapped SFS names
+#ARGS="pop2 popN 33 150 0.018 0.005" # pop1, pop2, projection for pop1, projection for pop2, mutation rate (per genotyped portion of the genome per generation), generation time in thousands of
+#years.
+#Population names can be anything. For ANGSD-derived SFS, projections should be 0.8*2N for each population (ronded to integer); in the case shown here, each population was represented by 10
+#individuals.
+
+CONTRAST=pop4popN
+ARGS="pop4 popN 68 150 0.018 0.005" # pop1, pop2, projection for pop1, projection for pop2, mutation rate (per genotyped portion of the genome per generation), generation time in thousands of
+#years.
+#Population names can be anything. For ANGSD-derived SFS, projections should be 0.8*2N for each population (ronded to integer); in the case shown here, each population was represented by 10
+#individuals.
+>winner.modsel
+for B in `seq 1 100`; do
+INFILE=${CONTRAST}_${B}.sfs;
+echo $INFILE;
+NMODELS=`cat winner.mods | wc -l`
+>winner.args
+>${CONTRAST}.winboots
+for i in `seq 1 $NMODELS`; do
+echo "$INFILE $ARGS >>${CONTRAST}.winboots & PID=\$! && sleep 360m && kill -9 \$PID " >>winner.args;
+done;
+paste winner.mods winner.args -d " " >>winner.modsel;
+done
+
+#########after booting
+#CONTRAST=pop2pop4
+#CONTRAST=pop2popN
+CONTRAST=pop4popN
+
+#have to add -a to each grep because for some reason it reading as binary, I think because of weird ^@ characters?
+#need to remove any lines that dont have all elements (just do in nano)
+sed -i 's/\x00//g' ${CONTRAST}.winboots
+grep -a RESULT ${CONTRAST}.winboots -A 4 | grep -aE "[0-9]|\]" | perl -pe 's/^100.+\.o\d+\S//' | perl -pe 's/\n//' | perl -pe 's/[\[\]]//g' | perl -pe 's/RESULT/\nRESULT/g' | grep -a RESULT >${CONTRAST}.winboots.res
+
+##Run script bestBoot_summary_JF.R to get parameter info
+##See script demo_plots.R for plotting info
+
+##Stairwayplot Analysis## NOTE FOLLOWED PIPELINE FROM https://github.com/xiaoming-liu/stairway-plot-v2
+export GENOME_REF=/projectnb/davieslab/jfifer/Japan_rad/ref_genome/Amil_v2.01/Amil.v2.01.chrs.fasta
+/projectnb/davieslab/jfifer/Japan_rad/angsd/misc/realSFS dadi ../../pop4.out.saf.idx ../../popN.out.saf.idx -sfs ../../pop4.sfs -sfs ../../popN.sfs -ref $GENOME_REF -anc $GENOME_REF >4Ndadiout
+realsfs2dadi.pl 4Ndadiout 21 94 >pop4N_dadi.data
+
+module load python2
+#Projetion should be 2n, will result in 2n-1 SFS numbers which is what SW requires
+PROJECTION=86 # 2 x (number of individuals in population 0)
+1dAFS.py pop4N_dadi.data pop0 $PROJECTION
+mv 1dsfss pop4.swout
+
+
+#create pop4.blueprint
+#example blueprint file start
+#input setting
+popid: pop4 # id of the population (no white space)
+nseq: 86 # number of sequences
+L: 497263 # total number of observed nucleic sites, including polymorphic and monomorphic
+whether_folded: false # whethr the SFS is folded (true or false)
+SFS:7373.00 3485.00 2047.00 1237.00 870.00 839.00 380.00 647.00 323.00 192.00 352.00 207.00 433.00 72.00 101.00 346.00 91.00 15.00 450.00 25.00 73.00 166.00 195.00 19.00 83.00 62.00 32.00 176.00 10.00 189.00 3.00 142.00 6.00 
+64.00 109.00 0.00 30.00 178.00 15.00 35.00 45.$
+#smallest_size_of_SFS_bin_used_for_estimation: 1 # default is 1; to ignore singletons, uncomment this line and change this number to 2
+#largest_size_of_SFS_bin_used_for_estimation: 20 # default is n-1; to ignore singletons, uncomment this line and change this number to nseq-2
+pct_training: 0.67 # percentage of sites for training
+nrand: 7        15      22      28 # number of random break points for each try (separated by white space)
+project_dir: swpop4 # project directory
+stairway_plot_dir: /usr4/bi594/jfifer/bin/stairway_plot_v2.1.1/stairway_plot_es # directory to the stairway plot files
+ninput: 200 # number of input files to be created for each estimation
+#random_seed: 6
+#output setting
+mu: 2e-8 # assumed mutation rate per site per generation
+year_per_generation: 5 # assumed generation time (in years)
+#plot setting
+plot_title: two-epoch # title of the plot
+xrange: 0.1,10000 # Time (1k year) range; format: xmin,xmax; "0,0" for default
+yrange: 0,0 # Ne (1k individual) range; format: xmin,xmax; "0,0" for default
+xspacing: 2 # X axis spacing
+yspacing: 2 # Y axis spacing
+fontsize: 12 # Font size
+#example blueprint file end 
+
+
+module load java
+java -cp /usr4/bi594/jfifer/bin/stairway_plot_v2.1.1/stairway_plot_es Stairbuilder pop4.blueprint
+#creates pop4.blueprint.sh
+# nano pop4.blueprint.sh add header for job and submit
+
+#See script stairway.R for plotting Stairway output
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Phylogenetic Analysis
+
+
+#NEED -doGeno 2 here for genotype calling
+#using unlinked sites here, but this was called with 80% of individuals. So need to double check w/ new LD filter without any minind.
+#for minIndDep in 1 2 4 6 8 10; do for minInd in 46 62 78 93 109 126 141; do for minmaf in 0 0.0001 0.001 0.01 0.05 0.01; \
+#do echo -e "FILTERS=\"-maxHetFreq 0.5 -uniqueOnly 1 -remove_bads 1 -setMinDepthInd $minIndDep -skipTriallelic 1 -minMapQ 25 -minQ 30 -doHWE 1 -sb_pval 1e-5 -hetbias_pval 1e-5 -minInd $minInd -minMaf $minmaf \"" '\n' \
+#TODO=\"-doMajorMinor 1 -doMaf 1 -dosnpstat 1 -doBcf 1 -doPost 2 -doGeno 2 -docounts 1\" '\n' \
+#/projectnb/davieslab/jfifer/Japan_rad/angsd/angsd -b ../../bamscl_3pop -GL 1 \$FILTERS \$TODO -P 1 -sites ../Unlinked_analyses/0.1_unlinked.sites -out Dep$minIndDep.minInd$minInd.minmaf$minmaf   >>filter_tests.sh; done; 
+done; done
+
+#Use JamesPopGenTools.pl b/c popgentools.pl will randomly subsample SNPs
+module load bcftools
+for i in *.bcf; do bcftools view $i> ${i/%.bcf}.vcf; done
+for i in *.vcf; do vcf2phylip.py -i $i -m 0; done
+for i in *phy; do sed 's/^.*rad\///' $i > tmp.$i; paste -d / phyallpops tmp.$i | sed  '1s/^.//' >$i; rm -f tmp.$i; done
+for i in *.phy; do echo "raxmlHPC-PTHREADS -T 10 -m GTRGAMMA -n ${i/%.phy} -s $i -p "\$RAN_SEED" -x  "\$RAN_SEED" -# 100" >> runsraxml; done
+#execute runsraxml.sh
+#runsraxml.sh start:
+!/bin/bash -l
+#$ -N raxml_runs_finaltrees # job name,anything you want
+#$ -l h_rt=12:00:00
+#$ -M james.e.fifer@gmail.com #your email
+#$ -m as # email only if aborted or suspended,
+#$ -t 1-218:1 #225
+#$ -pe omp 2
+
+module load raxml
+AN_SEED=`od -An -N4 -i /dev/random`
+RAN_SEED=$(bc <<< "scale=0; sqrt($AN_SEED*$AN_SEED)")
+echo Random seed: $RAN_SEED
+
+readarray -t CMD_ARRAY < runraxml_finaltrees
+
+INDEX=$(($SGE_TASK_ID-1))
+
+echo Executing command:  "${CMD_ARRAY[$INDEX]}"
+eval "${CMD_ARRAY[$INDEX]}"
+#runsraxml.sh end
+
+#to calculate percent missing
+#gunzip *.geno.gz
+#for i in *.geno; do missing=`tr -cd '"\-"' < $i | wc -c`;zeros=`tr -cd '"0"' < $i | wc -c`;ones=`tr -cd '"1"' < $i | wc -c`; twos=`tr -cd '"2"' < $i | wc -c`; echo $i; echo "scale=2 ; $missing / ($ones+$twos+$zeros)" | bc; 
+done
+
+##for each run if runs are aborted
+grep -L 'All 100 bootstrapped trees written to' *info* > unfinished.txt
+sed -i 's/^RAxML_info\.*//' unfinished.txt
+grep -Ff unfinished.txt runsraxml > runsraxml_4
+while read i; do echo "raxmlHPC-PTHREADS -T 10 -m GTRGAMMA -n $i -s $i.phy -p "\$RAN_SEED" -x  "\$RAN_SEED" -# 100"; done <unfinished.txt > runsraxml_10
+while read p; do   echo "rm -f *info*$p; rm -f *boot*$p"; done <unfinished.txt >removethese
+##chmod 777 remove these and execute
+##run runsraxml.sh with new # and time
+##can increase number of threads with -T
+
+##I believe there is a way to do this all in one run instead of seperate runs, but next find ML
+#Let's execute: raxmlHPC -m GTRGAMMA -p 12345 -# 20 -s dna.phy -n T13 This command will generate 20 ML trees on distinct starting trees and also print the tree with the best likelihood to a file called RAxML_bestTree.
+#need to remove all files with "info" beforehand
+for i in *.phy; do echo "raxmlHPC-PTHREADS -T 10 -m GTRGAMMA -n ${i/%.phy} -s $i -p "\$RAN_SEED" -# 20" >> runsraxml_ML; done
+
+grep -L 'Final GAMMA-based Score of best tree' *info* > unfinished.txt
+sed -i 's/^RAxML_info\.*//' unfinished.txt
+while read p; do   echo "rm -f *info*$p; rm -f *RAxML_result*$p*; rm -f *_parsimonyTree*$p*; rm -f *RAxML_log.*$p*; rm -f *RAxML_bestTree.*$p*"; done <unfinished.txt >removethese
+grep -Ff unfinished.txt runsraxml_ML > runsraxml_ML_2
+
+
+#while read p; do mv *info*$p INFO/; done <unfinished.txt
+while read p; do echo "raxmlHPC-PTHREADS -T 10 -m GTRGAMMA -n $p -s $p.phy -p "\$RAN_SEED" -# 20" >> runsraxml_ML; done <unfinished.txt
+
+#to view the trees
+module load java
+java -jar /usr4/bi594/jfifer/bin/FigTree_v1.4.4/lib/figtree.jar
+
+
+for i in *.phy; do echo "raxmlHPC-PTHREADS -T 2 -m GTRGAMMA -p "\$RAN_SEED" -f b -t RAxML_bestTree.${i/%.phy} -z RAxML_bootstrap.${i/%.phy} -n ${i/%.phy}" >> runraxml_finaltrees; done
+
+##Viewing trees
+java -jar /usr4/bi594/jfifer/bin/FigTree_v1.4.4/lib/figtree.jar RAxML_bipartitions.Dep1.minInd109.minmaf0.01.min0
+#^ Node and Branch labels will be the same but these are branch support values, not node support values
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##Identifying loci under selection across lineages
+#Bayescan 
+ILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5  -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 92 -snp_pval 1e-5 -minMaf 0.05"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+#angsd -b ./bamscl_northplus2 -GL 1 $FILTERS $TODO -P 1 -out myresultnorth2
+
+#pop4 vs north 137 *.8=109
+#FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5  -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 109 -snp_pval 1e-5 -minMaf 0.05"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+#angsd -b ./bamscl_northplus4 -GL 1 $FILTERS $TODO -P 1 -out myresultnorth4
+
+#pop2 vs pop 4 #64 individs * .8= 51
+#FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5  -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 51 -snp_pval 1e-5 -minMaf 0.05"
+#TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+#angsd -b ./bamscl_2plus4 -GL 1 $FILTERS $TODO -P 1 -out myresult24
+
+#pop1 vs pop3 94 *.8= 75
+FILTERS="-uniqueOnly 1 -remove_bads 1 -minMapQ 20 -minQ 25 -dosnpstat 1 -doHWE 1 -sb_pval 1e-5  -hetbias_pval 1e-5 -skipTriallelic 1 -minInd 75 -snp_pval 1e-5 -minMaf 0.05"
+TODO="-doMajorMinor 1 -doMaf 1 -doCounts 1 -makeMatrix 1 -doIBS 1 -doCov 1 -doGeno 8 -doVcf 1 -doPost 1 -doGlf 2"
+
+angsd -b ./bamscl_pop13 -GL 1 $FILTERS $TODO -P 1 -out myresult13
+
+
+#create vcfs for each comparison
+
+
+#create .spids for each vcf
+
+# create a file called vcf2bayescan.spid containing this text:
+echo "############
+# VCF Parser questions
+PARSER_FORMAT=VCF
+# Do you want to include a file with population definitions?
+VCF_PARSER_POP_QUESTION=true
+# Only input following regions (refSeqName:start:end, multiple regions: whitespace separated):
+VCF_PARSER_REGION_QUESTION=
+# What is the ploidy of the data?
+VCF_PARSER_PLOIDY_QUESTION=DIPLOID
+# Only output following individuals (ind1, ind2, ind4, ...):
+VCF_PARSER_IND_QUESTION=
+# Output genotypes as missing if the read depth of a position for the sample is below:
+VCF_PARSER_READ_QUESTION=
+# Take most likely genotype if "PL" or "GL" is given in the genotype field?
+VCF_PARSER_PL_QUESTION=true
+# Do you want to exclude loci with only missing data?
+VCF_PARSER_EXC_MISSING_LOCI_QUESTION=false
+# Select population definition file:
+VCF_PARSER_POP_FILE_QUESTION=./bspops_north2
+# Only output SNPs with a phred-scaled quality of at least:
+VCF_PARSER_QUAL_QUESTION=
+# Do you want to include non-polymorphic SNPs?
+VCF_PARSER_MONOMORPHIC_QUESTION=false
+# Output genotypes as missing if the phred-scale genotype quality is below:
+VCF_PARSER_GTQUAL_QUESTION=
+# GESTE / BayeScan Writer questions
+WRITER_FORMAT=GESTE_BAYE_SCAN
+# Specify which data type should be included in the GESTE / BayeScan file  (GESTE / BayeScan can only analyze one data type per file):
+GESTE_BAYE_SCAN_WRITER_DATA_TYPE_QUESTION=SNP
+############" >vcf2bayescan_n2.spid
+
+# create a file called vcf2bayescan.spid containing this text:
+echo "############
+# VCF Parser questions
+PARSER_FORMAT=VCF
+# Do you want to include a file with population definitions?
+VCF_PARSER_POP_QUESTION=true
+# Only input following regions (refSeqName:start:end, multiple regions: whitespace separated):
+VCF_PARSER_REGION_QUESTION=
+# What is the ploidy of the data?
+VCF_PARSER_PLOIDY_QUESTION=DIPLOID
+# Only output following individuals (ind1, ind2, ind4, ...):
+VCF_PARSER_IND_QUESTION=
+# Output genotypes as missing if the read depth of a position for the sample is below:
+VCF_PARSER_READ_QUESTION=
+# Take most likely genotype if "PL" or "GL" is given in the genotype field?
+VCF_PARSER_PL_QUESTION=true
+# Do you want to exclude loci with only missing data?
+VCF_PARSER_EXC_MISSING_LOCI_QUESTION=false
+# Select population definition file:
+VCF_PARSER_POP_FILE_QUESTION=./bspops_north4
+# Only output SNPs with a phred-scaled quality of at least:
+VCF_PARSER_QUAL_QUESTION=
+# Do you want to include non-polymorphic SNPs?
+VCF_PARSER_MONOMORPHIC_QUESTION=false
+# Output genotypes as missing if the phred-scale genotype quality is below:
+VCF_PARSER_GTQUAL_QUESTION=
+# GESTE / BayeScan Writer questions
+WRITER_FORMAT=GESTE_BAYE_SCAN
+# Specify which data type should be included in the GESTE / BayeScan file  (GESTE / BayeScan can only analyze one data type per file):
+GESTE_BAYE_SCAN_WRITER_DATA_TYPE_QUESTION=SNP
+############" >vcf2bayescan_n4.spid
+
+
+# create a file called vcf2bayescan.spid containing this text:
+echo "############
+# VCF Parser questions
+PARSER_FORMAT=VCF
+# Do you want to include a file with population definitions?
+VCF_PARSER_POP_QUESTION=true
+# Only input following regions (refSeqName:start:end, multiple regions: whitespace separated):
+VCF_PARSER_REGION_QUESTION=
+# What is the ploidy of the data?
+VCF_PARSER_PLOIDY_QUESTION=DIPLOID
+# Only output following individuals (ind1, ind2, ind4, ...):
+VCF_PARSER_IND_QUESTION=
+# Output genotypes as missing if the read depth of a position for the sample is below:
+VCF_PARSER_READ_QUESTION=
+# Take most likely genotype if "PL" or "GL" is given in the genotype field?
+VCF_PARSER_PL_QUESTION=true
+# Do you want to exclude loci with only missing data?
+VCF_PARSER_EXC_MISSING_LOCI_QUESTION=false
+# Select population definition file:
+VCF_PARSER_POP_FILE_QUESTION=./bspops_24
+# Only output SNPs with a phred-scaled quality of at least:
+VCF_PARSER_QUAL_QUESTION=
+# Do you want to include non-polymorphic SNPs?
+VCF_PARSER_MONOMORPHIC_QUESTION=false
+# Output genotypes as missing if the phred-scale genotype quality is below:
+VCF_PARSER_GTQUAL_QUESTION=
+# GESTE / BayeScan Writer questions
+WRITER_FORMAT=GESTE_BAYE_SCAN
+# Specify which data type should be included in the GESTE / BayeScan file  (GESTE / BayeScan can only analyze one data type per file):
+GESTE_BAYE_SCAN_WRITER_DATA_TYPE_QUESTION=SNP
+############" >vcf2bayescan_24.spid
+
+# create a file called vcf2bayescan.spid containing this text:
+echo "############
+# VCF Parser questions
+PARSER_FORMAT=VCF
+# Do you want to include a file with population definitions?
+VCF_PARSER_POP_QUESTION=true
+# Only input following regions (refSeqName:start:end, multiple regions: whitespace separated):
+VCF_PARSER_REGION_QUESTION=
+# What is the ploidy of the data?
+VCF_PARSER_PLOIDY_QUESTION=DIPLOID
+# Only output following individuals (ind1, ind2, ind4, ...):
+VCF_PARSER_IND_QUESTION=
+# Output genotypes as missing if the read depth of a position for the sample is below:
+VCF_PARSER_READ_QUESTION=
+# Take most likely genotype if "PL" or "GL" is given in the genotype field?
+VCF_PARSER_PL_QUESTION=true
+# Do you want to exclude loci with only missing data?
+VCF_PARSER_EXC_MISSING_LOCI_QUESTION=false
+# Select population definition file:
+VCF_PARSER_POP_FILE_QUESTION=./bspops_13
+# Only output SNPs with a phred-scaled quality of at least:
+VCF_PARSER_QUAL_QUESTION=
+# Do you want to include non-polymorphic SNPs?
+VCF_PARSER_MONOMORPHIC_QUESTION=false
+# Output genotypes as missing if the phred-scale genotype quality is below:
+VCF_PARSER_GTQUAL_QUESTION=
+# GESTE / BayeScan Writer questions
+WRITER_FORMAT=GESTE_BAYE_SCAN
+# Specify which data type should be included in the GESTE / BayeScan file  (GESTE / BayeScan can only analyze one data type per file):
+GESTE_BAYE_SCAN_WRITER_DATA_TYPE_QUESTION=SNP
+############" >vcf2bayescan_13.spid
+
+gunzip *vcf.gz
+
+module load java/1.8.0_181
+
+java -jar /projectnb/davieslab/jfifer/Japan_rad/Fst_Outlier/PGDSpider_2.0.7.1/PGDSpider2-cli.jar -inputfile your_filtered_snpsnorth2.vcf.recode.vcf -outputfile Best.bayescan_filtn2 -spid vcf2bayescan_filtn2.spid
+java -jar /projectnb/davieslab/jfifer/Japan_rad/Fst_Outlier/PGDSpider_2.0.7.1/PGDSpider2-cli.jar -inputfile your_filtered_snpsnorth4.vcf.recode.vcf -outputfile Best.bayescan_filtn4 -spid vcf2bayescan_filtn4.spid
+java -jar /projectnb/davieslab/jfifer/Japan_rad/Fst_Outlier/PGDSpider_2.0.7.1/PGDSpider2-cli.jar -inputfile your_filtered_snps13.vcf.recode.vcf -outputfile Best.bayescan_filt13 -spid vcf2bayescan_filt13.spid
+
+module load bayescan
+#better to submit following three lines as a job
+BayeScan2.1_linux64bits Best.bayescan_filtn2 -threads=20 -od Baye_filtn2_output/
+BayeScan2.1_linux64bits Best.bayescan_filtn4 -threads=20 -od Baye_filtn4_output/
+BayeScan2.1_linux64bits Best.bayescan_filt13 -threads=20 -od Baye_filt13_output/
+
+
+
+removeBayescanOutliers.pl bayescan=Baye_filtn2_output/Best.bayescan_fi_fst.txt vcf=./your_filtered_snpsnorth2.vcf.recode.vcf FDR=0.05 mode=extract >outliers_filtn2.vcf
+cut -f1,2 outliers_filtn2.vcf > outliers_filtn2.txt
+
+removeBayescanOutliers.pl bayescan=Baye_filtn4_output/Best.bayescan_fi_fst.txt vcf=./your_filtered_snpsnorth4.vcf.recode.vcf FDR=0.05 mode=extract >outliers_filtn4.vcf
+cut -f1,2 outliers_filtn4.vcf > outliers_filtn4.txt
+
+removeBayescanOutliers.pl bayescan=Baye_filt13_output/Best.bayescan_fi_fst.txt vcf=./your_filtered_snps13.vcf.recode.vcf FDR=0.05 mode=extract >outliers_filt13.vcf
+cut -f1,2 outliers_filt13.vcf > outliers_filt13.txt
+
+##PCADAPT use script pcadat.R #NOTE based on pipeline @ https://github.com/bcm-uga/pcadapt
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
