@@ -28,9 +28,12 @@ java -jar $TACC_PICARD_DIR/picard.jar CreateSequenceDictionary R=$GENOME_FASTA  
 for i in /projectnb/davieslab/jfifer/Japan_rad/Raw_fastqs/*.fastq; do ln -s $i ./; done
 2bRAD_trim_launch_dedup.pl fastq > trims
 
-#make sure files look like what they do in this trims^ add & to each line and 'wait' at end
+#make sure files look like what they do in this trims^ add module load perl, add & to the end of each line and 'wait' at end of trims file
 #e.g.:
 #../trim2bRAD_2barcodes_dedup.pl input=Fifer_Pool1-Fifer1_Pool12_S2_L004_R1_001.fastq site=".{12}CGA.{6}TGC.{12}|.{12}GCA.{6}TCG.{12}" adaptor="AGATC" sampleID=100 &
+#wait
+
+#submit trims as job 
 
 # quality filtering using fastx_toolkit (install fastx_toolkit if you don't have this module)
 module load fastx_toolkit
