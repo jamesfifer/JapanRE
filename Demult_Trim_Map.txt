@@ -6,7 +6,7 @@ cluste$
 module load perl
 module load bowtie
 module load samtools
-module load picard-tools
+module load picard
 
 # millepora fasta file 
 
